@@ -8,8 +8,6 @@ import NotificationsSettings from "./components/UserNotifications";
 import CreateUserAccount from "./components/CreateUserAccount";
 import CreateAccountSuccess from "./components/CreateAccountSuccess";
 import CreateUserLearnMore from "./components/CreateUserLearnMore";
-import AdminSideMenu from "./components/AdminSideMenu";
-import AdminDashboard from "./components/AdminDashboard";
 import UserSignInForm from "./components/UserSignInForm";
 import UserSignInSuccess from "./components/UserSignInSuccess";
 import { supabase } from "./lib/supabaseClient";
