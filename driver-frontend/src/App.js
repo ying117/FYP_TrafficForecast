@@ -72,7 +72,6 @@ export default function App() {
   const openMenu = () => setMenuOpen(true);
   const closeMenu = () => setMenuOpen(false);
 
-  const isAdmin = !!user && user.role === "admin";
   const isGuest = !user;
   const gateBlocking = !user && !guestAccess;
   const signupFlowOpen = accountOpen || learnOpen || createAccountSuccess;
@@ -83,10 +82,6 @@ export default function App() {
       setActivePage("live");
     }
   }, [isGuest, activePage]);
-
-  useEffect(() => {
-    if (isAdmin) setActivePage("dashboard");
-  }, [isAdmin]);
 
   function handleAuthed(u) {
     const appUser = {
@@ -262,15 +257,7 @@ export default function App() {
   // ===== NORMAL APP =====
   return (
     <div className="app" data-theme={theme}>
-      {isAdmin ? (
-        <AdminSideMenu
-          open={menuOpen}
-          onClose={closeMenu}
-          active={activePage}
-          onNavigate={setActivePage}
-        />
-      ) : (
-        <SideMenu
+      {<SideMenu
           open={menuOpen}
           onClose={closeMenu}
           activePage={activePage}
@@ -280,7 +267,7 @@ export default function App() {
           onSignIn={() => setSignInOpen(true)}
           onLogout={handleLogout}
         />
-      )}
+      }
 
       {/* LIVE MAP PAGE */}
       <section
@@ -382,18 +369,6 @@ export default function App() {
           onClose={() => setActivePage("live")}
         />
       </section>
-
-      {/* ADMIN: DASHBOARD */}
-      {!!user && user.role === "admin" && (
-        <section
-          className={`page page-admin ${
-            activePage === "dashboard" ? "is-active" : ""
-          }`}
-          aria-hidden={activePage !== "dashboard"}
-        >
-          <AdminDashboard />
-        </section>
-      )}
 
       {/* Modals */}
       <CreateUserAccount
