@@ -32,6 +32,7 @@ function UsersTab({ users }) {
         <select
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value)}
+          className="filter-select"
         >
           <option value="all">All Roles</option>
           <option value="admin">Admin</option>
@@ -41,6 +42,7 @@ function UsersTab({ users }) {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
+          className="filter-select"
         >
           <option value="all">All Status</option>
           <option value="active">Active</option>
@@ -165,3 +167,4 @@ function UsersTab({ users }) {
 }
 
 export default UsersTab;
+
