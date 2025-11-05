@@ -1,3 +1,4 @@
+//working
 import React from "react";
 
 function IncidentCard({
@@ -31,28 +32,86 @@ function IncidentCard({
     }
   };
 
+  // Function to capitalize first letter of each word
+  const capitalizeWords = (text) => {
+    if (!text) return "";
+    return text
+      .toLowerCase()
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
   const tagsArray = getTagsArray();
-  const hasVerifiedTag = tagsArray.includes("verified");
+  const hasVerifiedTag = tagsArray.some(
+    (tag) => tag.toLowerCase() === "verified"
+  );
 
   return (
     <div className="incident-card">
       <div className="incident-header">
-        <h4>{incident.location}</h4>
-        {incident.fullAddress && (
-          <p className="full-address">{incident.fullAddress}</p>
-        )}
+        <div className="location-section">
+          <h4>{incident.location}</h4>
+          {/* Display full address directly under location */}
+          {incident.fullAddress && (
+            <p className="full-address">Address: {incident.fullAddress}</p>
+          )}
+        </div>
         <div className="incident-tags">
+          {/* Show Verified tag FIRST if incident has verified tag */}
+          {hasVerifiedTag && <span className="verified-tag">Verified</span>}
+
+          {/* Show Approved tag if incident is approved */}
+          {incident.status === "approved" && (
+            <span className="approved-tag">Approved</span>
+          )}
+
+          {/* Show Rejected tag if incident is rejected */}
+          {incident.status === "rejected" && (
+            <span className="rejected-tag">Rejected</span>
+          )}
+
           <span
             className={`severity-tag ${
               incident.severity?.toLowerCase() || "medium"
             }`}
           >
-            {incident.severity}
+            {capitalizeWords(incident.severity)}
           </span>
-          <span className="type-tag">{incident.incidentType}</span>
-          {hasVerifiedTag && <span className="verified-tag">verified</span>}
+          <span className="type-tag">
+            {capitalizeWords(incident.incidentType)}
+          </span>
+
+          {/* Show other custom tags (excluding verified since we show it separately) */}
+          {tagsArray.map((tag, index) => {
+            const lowerTag = tag.toLowerCase();
+            // Skip verified tag since we show it separately at the beginning
+            if (lowerTag === "verified") return null;
+
+            return (
+              <span
+                key={index}
+                className={
+                  lowerTag === "urgent" || lowerTag === "recurring"
+                    ? "type-tag"
+                    : "type-tag"
+                }
+              >
+                {capitalizeWords(tag)}
+              </span>
+            );
+          })}
         </div>
       </div>
+
+      {/* Show rejection reason if available */}
+      {incident.status === "rejected" && incident.reason && (
+        <div className="rejection-reason">
+          <strong>Rejection Reason:</strong>
+          <p>{incident.reason}</p>
+        </div>
+      )}
+
       <p className="incident-description">{incident.description}</p>
       {incident.photo_url && (
         <div className="incident-photo">
@@ -64,7 +123,9 @@ function IncidentCard({
         </div>
       )}
       <div className="incident-meta">
-        <span>Reported by user: {incident.user_id}</span>
+        <span>
+          Reported by: {incident.users?.name || `User ${incident.user_id}`}
+        </span>
         <span>{new Date(incident.createdAt).toLocaleDateString()}</span>
       </div>
       <div className="incident-actions">

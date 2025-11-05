@@ -57,22 +57,42 @@ export default function AdminDashboard() {
       setLoading(true);
       console.log("🔄 Fetching data from Supabase...");
 
-      // In AdminDashboard.js fetchData function
-      const { data: incidentsData, error: incidentsError } =
-        await supabase.from("incident_report").select(`
-    id, user_id, incidentType, severity, location, fullAddress, 
-    description, photo_url, createdAt, status, tags
-  `);
+      // Fetch incidents with user information
+      const { data: incidentsData, error: incidentsError } = await supabase
+        .from("incident_report")
+        .select(
+          `
+            id, user_id, incidentType, severity, location, fullAddress, 
+            description, photo_url, createdAt, status, tags, reason,
+            users:user_id (name, email)
+          `
+        )
+        .order("createdAt", { ascending: false });
 
       if (incidentsError) {
         console.error("❌ Error fetching incidents:", incidentsError);
         setDebugInfo(`Incidents Error: ${incidentsError.message}`);
       } else {
-        console.log(`📊 Fetched ${incidentsData?.length || 0} incidents`);
-        setIncidents(incidentsData || []);
+        // Normalize statuses to ensure consistency
+        const processedIncidents = (incidentsData || []).map((incident) => {
+          const rawStatus = incident.status?.toLowerCase();
+          let normalizedStatus = "pending";
+
+          if (rawStatus === "approved" || rawStatus === "rejected") {
+            normalizedStatus = rawStatus;
+          }
+
+          return {
+            ...incident,
+            status: normalizedStatus,
+          };
+        });
+
+        console.log(`📊 Fetched ${processedIncidents.length} incidents`);
+        setIncidents(processedIncidents);
       }
 
-      // Fetch users from users table - only columns that exist
+      // Fetch users from users table
       const { data: usersData, error: usersError } = await supabase
         .from("users")
         .select(
@@ -112,29 +132,16 @@ export default function AdminDashboard() {
     // Calculate today's reports
     let todaysReports = 0;
     if (incidentsData.length > 0) {
-      const firstIncident = incidentsData[0];
-      const dateFields = Object.keys(firstIncident).filter(
-        (key) =>
-          key.includes("date") ||
-          key.includes("Date") ||
-          key.includes("created") ||
-          key.includes("Created") ||
-          key.includes("time")
-      );
-
-      if (dateFields.length > 0) {
-        const dateField = dateFields[0];
-        todaysReports = incidentsData.filter(
-          (incident) =>
-            incident[dateField] && incident[dateField].startsWith(today)
-        ).length;
-      } else {
-        todaysReports = incidentsData.length;
-      }
+      todaysReports = incidentsData.filter(
+        (incident) => incident.createdAt && incident.createdAt.startsWith(today)
+      ).length;
     }
 
     const pendingReviews = incidentsData.filter(
-      (incident) => incident.status === "pending"
+      (incident) =>
+        !incident.status ||
+        incident.status === "pending" ||
+        !["approved", "rejected"].includes(incident.status)
     ).length;
 
     // Count banned users
@@ -142,8 +149,10 @@ export default function AdminDashboard() {
       (user) => user.status === "banned"
     ).length;
 
+    // Count verified reports
     const verifiedReports = incidentsData.filter(
-      (incident) => incident.tags && incident.tags.includes("verified")
+      (incident) =>
+        incident.tags && incident.tags.toLowerCase().includes("verified")
     ).length;
 
     const pendingAppeals = incidentsData.filter(
@@ -179,25 +188,70 @@ export default function AdminDashboard() {
   };
 
   // Function to update incident status in Supabase
-  // Function to update incident status in Supabase
-  const updateIncidentStatus = async (incidentId, status, tags = []) => {
+  const updateIncidentStatus = async (
+    incidentId,
+    status,
+    tags = [],
+    reason = null
+  ) => {
     try {
-      // If tags is an array, convert to text
+      console.log("🔄 Updating incident:", {
+        incidentId,
+        status,
+        tags,
+        reason,
+      });
+
+      // Normalize status to lowercase and validate
+      const normalizedStatus = status?.toLowerCase();
+      const validStatus =
+        normalizedStatus === "approved" || normalizedStatus === "rejected"
+          ? normalizedStatus
+          : "pending";
+
       const tagsValue = Array.isArray(tags) ? tags.join(", ") : tags;
+
+      // Build update data
+      const updateData = {
+        status: validStatus,
+        tags: tagsValue,
+      };
+
+      // Only add reason if provided (for rejections)
+      if (reason) {
+        updateData.reason = reason;
+      }
 
       const { data, error } = await supabase
         .from("incident_report")
-        .update({
-          status,
-          tags: tagsValue, // Store as text
-        })
+        .update(updateData)
         .eq("id", incidentId)
         .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Supabase error:", error);
+        throw error;
+      }
+
+      console.log("✅ Incident updated successfully:", data[0]);
+
+      // Update local state immediately for instant UI feedback
+      setIncidents((prevIncidents) =>
+        prevIncidents.map((incident) =>
+          incident.id === incidentId
+            ? {
+                ...incident,
+                status: validStatus,
+                tags: tagsValue,
+                reason: reason || incident.reason,
+              }
+            : incident
+        )
+      );
+
       return data[0];
     } catch (error) {
-      console.error("Error updating incident:", error);
+      console.error("❌ Error updating incident:", error);
       return null;
     }
   };
