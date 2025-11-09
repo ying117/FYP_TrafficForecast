@@ -1,21 +1,20 @@
 import React, { useState } from "react";
 
+// In ApproveModal.js
 function ApproveModal({ incident, onClose, onApprove }) {
   const [tags, setTags] = useState("");
 
-  const handleApprove = () => {
-    // Convert tags string to array and automatically add "verified" tag
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    // Convert tags string to array, or use empty array if no tags
     const tagsArray = tags
       .split(",")
       .map((tag) => tag.trim())
-      .filter((tag) => tag);
+      .filter((tag) => tag !== "");
 
-    // Add "verified" tag if not already present
-    if (!tagsArray.some((tag) => tag.toLowerCase() === "verified")) {
-      tagsArray.push("verified");
-    }
-
-    onApprove(tagsArray); // Pass tags to parent
+    // Call onApprove with tags array (can be empty)
+    onApprove(tagsArray);
   };
 
   return (
@@ -23,28 +22,34 @@ function ApproveModal({ incident, onClose, onApprove }) {
       <div className="modal-content">
         <div className="modal-header">
           <h3>Approve Incident</h3>
-          <button onClick={onClose} className="close-btn">
+          <button className="close-btn" onClick={onClose}>
             ×
           </button>
         </div>
-        <div className="approve-form">
-          <label>Add Tags (optional)</label>
-          <input
-            type="text"
-            placeholder="e.g. urgent, recurring..."
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-          />
-          <p className="help-text">Separate multiple tags with commas.</p>
-        </div>
-        <div className="modal-actions">
-          <button onClick={onClose} className="btn-outline">
-            Cancel
-          </button>
-          <button onClick={handleApprove} className="btn-success">
-            Approve Incident
-          </button>
-        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="approve-form">
+            <label htmlFor="approve-tags">
+              Add Tags (comma-separated, optional):
+            </label>
+            <input
+              type="text"
+              id="approve-tags"
+              placeholder="urgent, recurring, etc."
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="btn-outline" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-success">
+              Approve Incident
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

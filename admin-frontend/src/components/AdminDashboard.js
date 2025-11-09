@@ -5,14 +5,12 @@ import IncidentsTab from "./IncidentsTab";
 import UsersTab from "./UsersTab";
 import AnalyticsTab from "./AnalyticsTab";
 import AppealsTab from "./AppealsTab";
-import BulkActionsTab from "./BulkActionsTab";
 import AuditLogsTab from "./AuditLogsTab";
 import ExportTab from "./ExportTab";
 import { supabase } from "../lib/supabaseClient";
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState("home");
-  const [selectedIncidents, setSelectedIncidents] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState({
@@ -27,13 +25,16 @@ export default function AdminDashboard() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [debugInfo, setDebugInfo] = useState("");
 
+  // Use the actual logged-in admin ID
+  const currentAdminId = user?.userid;
+
+  // Tabs without Bulk Actions
   const tabs = [
     "Home",
     "Incidents",
     "Users",
     "Analytics",
     "Appeals",
-    "Bulk Actions",
     "Audit Logs",
     "Export",
   ];
@@ -57,15 +58,17 @@ export default function AdminDashboard() {
       setLoading(true);
       console.log("🔄 Fetching data from Supabase...");
 
-      // Fetch incidents with user information
+      // Fetch incidents with user information AND admin verifier information
       const { data: incidentsData, error: incidentsError } = await supabase
         .from("incident_report")
         .select(
           `
-            id, user_id, incidentType, severity, location, fullAddress, 
-            description, photo_url, createdAt, status, tags, reason,
-            users:user_id (name, email)
-          `
+          id, user_id, incidentType, severity, location, fullAddress, 
+          description, photo_url, createdAt, status, tags, reason,
+          verified_at, verified_by,
+          users:user_id (name, email),
+          admin_verifier:verified_by (name)
+        `
         )
         .order("createdAt", { ascending: false });
 
@@ -73,7 +76,6 @@ export default function AdminDashboard() {
         console.error("❌ Error fetching incidents:", incidentsError);
         setDebugInfo(`Incidents Error: ${incidentsError.message}`);
       } else {
-        // Normalize statuses to ensure consistency
         const processedIncidents = (incidentsData || []).map((incident) => {
           const rawStatus = incident.status?.toLowerCase();
           let normalizedStatus = "pending";
@@ -129,7 +131,6 @@ export default function AdminDashboard() {
   const calculateStats = (incidentsData, usersData) => {
     const today = new Date().toISOString().split("T")[0];
 
-    // Calculate today's reports
     let todaysReports = 0;
     if (incidentsData.length > 0) {
       todaysReports = incidentsData.filter(
@@ -144,15 +145,12 @@ export default function AdminDashboard() {
         !["approved", "rejected"].includes(incident.status)
     ).length;
 
-    // Count banned users
     const bannedUsers = usersData.filter(
       (user) => user.status === "banned"
     ).length;
 
-    // Count verified reports
     const verifiedReports = incidentsData.filter(
-      (incident) =>
-        incident.tags && incident.tags.toLowerCase().includes("verified")
+      (incident) => incident.verified_at !== null
     ).length;
 
     const pendingAppeals = incidentsData.filter(
@@ -173,21 +171,7 @@ export default function AdminDashboard() {
     setStats(newStats);
   };
 
-  const toggleIncidentSelection = (id) => {
-    setSelectedIncidents((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  };
-
-  const selectAllIncidents = () => {
-    setSelectedIncidents(incidents.map((i) => i.id));
-  };
-
-  const clearSelection = () => {
-    setSelectedIncidents([]);
-  };
-
-  // Function to update incident status in Supabase
+  // Function to update incident status in Supabase with verification tracking
   const updateIncidentStatus = async (
     incidentId,
     status,
@@ -202,7 +186,6 @@ export default function AdminDashboard() {
         reason,
       });
 
-      // Normalize status to lowercase and validate
       const normalizedStatus = status?.toLowerCase();
       const validStatus =
         normalizedStatus === "approved" || normalizedStatus === "rejected"
@@ -211,13 +194,13 @@ export default function AdminDashboard() {
 
       const tagsValue = Array.isArray(tags) ? tags.join(", ") : tags;
 
-      // Build update data
       const updateData = {
         status: validStatus,
         tags: tagsValue,
+        verified_at: new Date().toISOString(),
+        verified_by: currentAdminId,
       };
 
-      // Only add reason if provided (for rejections)
       if (reason) {
         updateData.reason = reason;
       }
@@ -235,7 +218,6 @@ export default function AdminDashboard() {
 
       console.log("✅ Incident updated successfully:", data[0]);
 
-      // Update local state immediately for instant UI feedback
       setIncidents((prevIncidents) =>
         prevIncidents.map((incident) =>
           incident.id === incidentId
@@ -244,6 +226,8 @@ export default function AdminDashboard() {
                 status: validStatus,
                 tags: tagsValue,
                 reason: reason || incident.reason,
+                verified_at: new Date().toISOString(),
+                verified_by: currentAdminId,
               }
             : incident
         )
@@ -378,13 +362,57 @@ export default function AdminDashboard() {
     fetchData();
   };
 
+  const logAuditAction = async (
+    actionType,
+    description,
+    details = null,
+    targetUserId = null,
+    targetIncidentId = null
+  ) => {
+    try {
+      console.log("📝 Logging audit action:", { actionType, description });
+
+      const { data, error } = await supabase
+        .from("audit_logs")
+        .insert({
+          admin_id: currentAdminId,
+          action_type: actionType,
+          target_user_id: targetUserId,
+          target_incident_id: targetIncidentId,
+          description: description,
+          details: details,
+          created_at: new Date().toISOString(),
+        })
+        .select();
+
+      if (error) {
+        console.error("❌ Supabase insert error:", error);
+        return false;
+      }
+
+      console.log("✅ Audit action logged successfully:", data);
+      return true;
+    } catch (error) {
+      console.error("❌ Unexpected error in audit logger:", error);
+      return false;
+    }
+  };
+
   return (
     <div className="admin-dashboard">
       <header className="admin-header">
-        <h1>Admin Dashboard</h1>
+        <div className="header-left">
+          <h1>Admin Dashboard</h1>
+          <div className="user-info">
+            Welcome, <strong>{user?.name}</strong> ({user?.role})
+          </div>
+        </div>
         <div className="header-info">
           <button onClick={handleManualRefresh} className="btn-outline">
             Refresh Data
+          </button>
+          <button onClick={onLogout} className="btn-outline logout-btn">
+            Logout
           </button>
           <div className="last-updated">
             Last updated: {lastUpdated.toLocaleTimeString()}
@@ -399,8 +427,10 @@ export default function AdminDashboard() {
         {tabs.map((tab) => (
           <button
             key={tab}
-            className={`tab ${activeTab === tab.toLowerCase() ? "active" : ""}`}
-            onClick={() => setActiveTab(tab.toLowerCase())}
+            className={`tab ${
+              activeTab === tab.toLowerCase().replace(" ", "_") ? "active" : ""
+            }`}
+            onClick={() => setActiveTab(tab.toLowerCase().replace(" ", "_"))}
           >
             {tab}
           </button>
@@ -416,6 +446,7 @@ export default function AdminDashboard() {
           <IncidentsTab
             incidents={incidents}
             onUpdateIncident={updateIncidentStatus}
+            onLogAction={logAuditAction}
           />
         )}
         {activeTab === "users" && (
@@ -424,21 +455,12 @@ export default function AdminDashboard() {
             onUpdateUser={updateUserStatus}
             onUpdateRole={updateUserRole}
             onDeleteUser={deleteUser}
+            onLogAction={logAuditAction}
           />
         )}
         {activeTab === "analytics" && <AnalyticsTab />}
-        {activeTab === "appeals" && <AppealsTab />}
-        {activeTab === "bulk actions" && (
-          <BulkActionsTab
-            incidents={incidents}
-            selectedIncidents={selectedIncidents}
-            toggleIncidentSelection={toggleIncidentSelection}
-            selectAllIncidents={selectAllIncidents}
-            clearSelection={clearSelection}
-            onUpdateIncidents={updateIncidentStatus}
-          />
-        )}
-        {activeTab === "audit logs" && <AuditLogsTab />}
+        {activeTab === "appeals" && <AppealsTab onLogAction={logAuditAction} />}
+        {activeTab === "audit_logs" && <AuditLogsTab />}
         {activeTab === "export" && <ExportTab />}
       </div>
     </div>

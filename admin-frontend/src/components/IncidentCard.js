@@ -1,4 +1,3 @@
-//working
 import React from "react";
 
 function IncidentCard({
@@ -7,6 +6,7 @@ function IncidentCard({
   onApprove,
   onReject,
   onAddTags,
+  onRetract, // Add this new prop
 }) {
   // Safely handle tags with comprehensive error checking
   const getTagsArray = () => {
@@ -43,9 +43,8 @@ function IncidentCard({
   };
 
   const tagsArray = getTagsArray();
-  const hasVerifiedTag = tagsArray.some(
-    (tag) => tag.toLowerCase() === "verified"
-  );
+  const isResolved =
+    incident.status === "approved" || incident.status === "rejected";
 
   return (
     <div className="incident-card">
@@ -58,8 +57,17 @@ function IncidentCard({
           )}
         </div>
         <div className="incident-tags">
-          {/* Show Verified tag FIRST if incident has verified tag */}
-          {hasVerifiedTag && <span className="verified-tag">Verified</span>}
+          {/* Show verification info if available */}
+          {incident.verified_at && (
+            <span
+              className="verified-tag"
+              title={`${
+                incident.status === "approved" ? "Approved" : "Rejected"
+              } on ${new Date(incident.verified_at).toLocaleDateString()}`}
+            >
+              {incident.status === "approved" ? "Approved" : "Rejected"} ✓
+            </span>
+          )}
 
           {/* Show Approved tag if incident is approved */}
           {incident.status === "approved" && (
@@ -82,27 +90,37 @@ function IncidentCard({
             {capitalizeWords(incident.incidentType)}
           </span>
 
-          {/* Show other custom tags (excluding verified since we show it separately) */}
-          {tagsArray.map((tag, index) => {
-            const lowerTag = tag.toLowerCase();
-            // Skip verified tag since we show it separately at the beginning
-            if (lowerTag === "verified") return null;
-
-            return (
-              <span
-                key={index}
-                className={
-                  lowerTag === "urgent" || lowerTag === "recurring"
-                    ? "type-tag"
-                    : "type-tag"
-                }
-              >
-                {capitalizeWords(tag)}
-              </span>
-            );
-          })}
+          {/* Show other custom tags */}
+          {tagsArray.map((tag, index) => (
+            <span key={index} className="type-tag">
+              {capitalizeWords(tag)}
+            </span>
+          ))}
         </div>
       </div>
+
+      {/* Show action details for BOTH approved and rejected incidents */}
+      {incident.verified_at && (
+        <div
+          className={`action-info ${
+            incident.status === "rejected"
+              ? "rejection-info"
+              : "verification-info"
+          }`}
+        >
+          <small>
+            <strong>
+              {incident.status === "approved" ? "Approved" : "Rejected"}:
+            </strong>{" "}
+            {new Date(incident.verified_at).toLocaleString()}
+            {incident.admin_verifier?.name &&
+              ` by ${incident.admin_verifier.name}`}
+            {!incident.admin_verifier?.name &&
+              incident.verified_by &&
+              ` by Admin ${incident.verified_by}`}
+          </small>
+        </div>
+      )}
 
       {/* Show rejection reason if available */}
       {incident.status === "rejected" && incident.reason && (
@@ -132,15 +150,28 @@ function IncidentCard({
         <button onClick={() => onAIAnalysis(incident)} className="btn-outline">
           AI Analysis
         </button>
-        <button onClick={() => onApprove(incident)} className="btn-success">
-          Approve
-        </button>
-        <button onClick={() => onReject(incident)} className="btn-danger">
-          Reject
-        </button>
-        <button onClick={() => onAddTags(incident)} className="btn-outline">
-          Add Tags
-        </button>
+
+        {/* Show different actions based on status */}
+        {incident.status === "pending" && (
+          <>
+            <button onClick={() => onApprove(incident)} className="btn-success">
+              Approve
+            </button>
+            <button onClick={() => onReject(incident)} className="btn-danger">
+              Reject
+            </button>
+            <button onClick={() => onAddTags(incident)} className="btn-outline">
+              Add Tags
+            </button>
+          </>
+        )}
+
+        {/* Show retract button for resolved incidents */}
+        {isResolved && (
+          <button onClick={() => onRetract(incident)} className="btn-warning">
+            Retract Decision
+          </button>
+        )}
       </div>
     </div>
   );

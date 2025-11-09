@@ -4,7 +4,13 @@ import UnbanModal from "./UnbanModal";
 import DeleteUserModal from "./DeleteUserModal";
 import RoleModal from "./RoleModal";
 
-function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
+function UsersTab({
+  users,
+  onUpdateUser,
+  onUpdateRole,
+  onDeleteUser,
+  onLogAction,
+}) {
   const [selectedUser, setSelectedUser] = useState(null);
   const [showBanModal, setShowBanModal] = useState(false);
   const [showUnbanModal, setShowUnbanModal] = useState(false);
@@ -12,6 +18,7 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState(""); // Add search term state
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,12 +81,19 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
     });
   };
 
-  // Filter users based on role and status
+  // Filter users based on role, status, and search term
   const filteredUsers = users.filter((user) => {
     const matchesRole = roleFilter === "all" || user.role === roleFilter;
     const matchesStatus =
       statusFilter === "all" || user.status === statusFilter;
-    return matchesRole && matchesStatus;
+    const matchesSearch =
+      searchTerm === "" ||
+      (user.name &&
+        user.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (user.email &&
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    return matchesRole && matchesStatus && matchesSearch;
   });
 
   // Apply custom sorting to filtered users
@@ -173,31 +187,43 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
   // Reset to page 1 when filters change
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [roleFilter, statusFilter]);
+  }, [roleFilter, statusFilter, searchTerm]);
 
   return (
     <div className="users-tab">
-      <div className="filters">
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          className="filter-select"
-        >
-          <option value="all">All Roles</option>
-          <option value="admin">Admin</option>
-          <option value="moderator">Moderator</option>
-          <option value="user">User</option>
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="filter-select"
-        >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="banned">Banned</option>
-          <option value="inactive">Inactive</option>
-        </select>
+      {/* Users Tab - Now Vertical Layout */}
+      <div className="users-filters-column">
+        <div className="user-search-container">
+          <input
+            type="text"
+            placeholder="Search users..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="user-search-input"
+          />
+        </div>
+        <div className="user-filter-dropdowns">
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="user-filter-select"
+          >
+            <option value="all">All Roles</option>
+            <option value="admin">Admin</option>
+            <option value="moderator">Moderator</option>
+            <option value="user">User</option>
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="user-filter-select"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="banned">Banned</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
       </div>
 
       <div className="users-table">
@@ -250,13 +276,23 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
                     {/* Show different actions based on status */}
                     {user.status === "inactive" ? (
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (onUpdateUser && user) {
-                            onUpdateUser(
+                            const success = await onUpdateUser(
                               user.userid,
                               "active",
                               "User restored by admin"
                             );
+                            if (success && onLogAction) {
+                              // LOG AUDIT ACTION
+                              await onLogAction(
+                                "user_restore",
+                                `Restored user: ${user.name} (${user.email})`,
+                                "User account reactivated",
+                                user.userid, // targetUserId
+                                null // targetIncidentId
+                              );
+                            }
                           }
                         }}
                         className="btn-success"
@@ -344,14 +380,28 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
         </div>
       </div>
 
-      {/* Modals remain the same */}
+      {/* Modals with Audit Logging */}
       {showBanModal && (
         <BanModal
           user={selectedUser}
           onClose={() => setShowBanModal(false)}
-          onBan={(reason, description) => {
+          onBan={async (reason, description) => {
             if (onUpdateUser && selectedUser) {
-              onUpdateUser(selectedUser.userid, "banned", description);
+              const success = await onUpdateUser(
+                selectedUser.userid,
+                "banned",
+                description
+              );
+              if (success && onLogAction) {
+                // LOG AUDIT ACTION
+                await onLogAction(
+                  "user_ban",
+                  `Banned user: ${selectedUser.name} (${selectedUser.email})`,
+                  `Reason: ${reason} | Details: ${description}`,
+                  selectedUser.userid, // targetUserId
+                  null // targetIncidentId
+                );
+              }
             }
             setShowBanModal(false);
           }}
@@ -362,9 +412,23 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
         <UnbanModal
           user={selectedUser}
           onClose={() => setShowUnbanModal(false)}
-          onUnban={(reason) => {
+          onUnban={async (reason) => {
             if (onUpdateUser && selectedUser) {
-              onUpdateUser(selectedUser.userid, "active", reason);
+              const success = await onUpdateUser(
+                selectedUser.userid,
+                "active",
+                reason
+              );
+              if (success && onLogAction) {
+                // LOG AUDIT ACTION
+                await onLogAction(
+                  "user_unban",
+                  `Unbanned user: ${selectedUser.name} (${selectedUser.email})`,
+                  `Reason: ${reason}`,
+                  selectedUser.userid, // targetUserId
+                  null // targetIncidentId
+                );
+              }
             }
             setShowUnbanModal(false);
           }}
@@ -375,9 +439,20 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
         <RoleModal
           user={selectedUser}
           onClose={() => setShowRoleModal(false)}
-          onRoleChange={(newRole) => {
+          onRoleChange={async (newRole) => {
             if (onUpdateRole && selectedUser) {
-              onUpdateRole(selectedUser.userid, newRole);
+              const oldRole = selectedUser.role || "user";
+              const success = await onUpdateRole(selectedUser.userid, newRole);
+              if (success && onLogAction) {
+                // LOG AUDIT ACTION
+                await onLogAction(
+                  "role_change",
+                  `Changed role for user: ${selectedUser.name} (${selectedUser.email})`,
+                  `From: ${oldRole} → To: ${newRole}`,
+                  selectedUser.userid, // targetUserId
+                  null // targetIncidentId
+                );
+              }
             }
             setShowRoleModal(false);
           }}
@@ -388,9 +463,19 @@ function UsersTab({ users, onUpdateUser, onUpdateRole, onDeleteUser }) {
         <DeleteUserModal
           user={selectedUser}
           onClose={() => setShowDeleteModal(false)}
-          onDelete={(reason) => {
+          onDelete={async (reason) => {
             if (onDeleteUser && selectedUser) {
-              onDeleteUser(selectedUser.userid, reason);
+              const success = await onDeleteUser(selectedUser.userid, reason);
+              if (success && onLogAction) {
+                // LOG AUDIT ACTION
+                await onLogAction(
+                  "user_delete",
+                  `Deleted user: ${selectedUser.name} (${selectedUser.email})`,
+                  `Reason: ${reason}`,
+                  selectedUser.userid, // targetUserId
+                  null // targetIncidentId
+                );
+              }
             }
             setShowDeleteModal(false);
           }}

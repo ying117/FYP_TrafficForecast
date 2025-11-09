@@ -4,16 +4,16 @@ import ApproveAppealModal from "./ApproveAppealModal";
 import RejectAppealModal from "./RejectAppealModal";
 import RetractConfirmationModal from "./RetractConfirmationModal";
 
-function AppealsTab() {
+function AppealsTab({ onLogAction }) {
   const [appeals, setAppeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAppeal, setSelectedAppeal] = useState(null);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showRetractModal, setShowRetractModal] = useState(false);
-  const [filter, setFilter] = useState("pending"); // "pending", "resolved", or "all"
+  const [filter, setFilter] = useState("pending");
+  const [typeFilter, setTypeFilter] = useState("all");
 
-  // Mock admin ID for testing
   const mockAdminId = 5;
 
   // Fetch appeals from database
@@ -43,13 +43,13 @@ function AppealsTab() {
 
       if (error) throw error;
 
-      // Transform data for UI
       const formattedAppeals = (appealsData || []).map((appeal) => ({
         id: appeal.appeals_id,
         type:
           appeal.appeal_type === "ban_appeal"
             ? "Ban Appeal"
             : "Incident Rejection Appeal",
+        appealType: appeal.appeal_type,
         from: appeal.users?.name || `User ${appeal.user_id}`,
         submitted: new Date(appeal.created_at).toLocaleDateString("en-US", {
           year: "numeric",
@@ -62,9 +62,7 @@ function AppealsTab() {
         status: appeal.status,
         admin_response: appeal.admin_response,
         responded_by: appeal.responded_by,
-        // Store original data for updates
         appealData: appeal,
-        // Incident context for incident appeals
         incidentContext: appeal.incidents
           ? {
               id: appeal.incidents.id,
@@ -75,7 +73,6 @@ function AppealsTab() {
               status: appeal.incidents.status,
             }
           : null,
-        // User context for ban appeals
         userContext: appeal.users
           ? {
               id: appeal.users.userid,
@@ -116,9 +113,6 @@ function AppealsTab() {
     if (!selectedAppeal) return;
 
     try {
-      console.log("Retracting decision for appeal:", selectedAppeal.id);
-
-      // Reset appeal status to pending
       const { error: appealError } = await supabase
         .from("appeals")
         .update({
@@ -131,14 +125,12 @@ function AppealsTab() {
 
       if (appealError) throw appealError;
 
-      // Reverse the actions that were taken when the appeal was approved
       const appealData = selectedAppeal.appealData;
 
       if (
         appealData.appeal_type === "ban_appeal" &&
         selectedAppeal.status === "approved"
       ) {
-        // Re-ban the user (since we unbanned them when approving)
         const { error: userError } = await supabase
           .from("users")
           .update({
@@ -148,13 +140,20 @@ function AppealsTab() {
           .eq("userid", appealData.user_id);
 
         if (userError) throw userError;
-        console.log("User re-banned:", appealData.user_id);
+
+        // Audit log
+        await onLogAction(
+          "appeal_retract",
+          `Retracted ban appeal decision for user: ${selectedAppeal.from}`,
+          "Appeal reopened - user re-banned",
+          appealData.user_id,
+          null
+        );
       } else if (
         appealData.appeal_type === "incident_rejection_appeal" &&
         appealData.incident_id &&
         selectedAppeal.status === "approved"
       ) {
-        // Re-reject the incident (since we approved it when appeal was approved)
         const { error: incidentError } = await supabase
           .from("incident_report")
           .update({
@@ -164,10 +163,17 @@ function AppealsTab() {
           .eq("id", appealData.incident_id);
 
         if (incidentError) throw incidentError;
-        console.log("Incident re-rejected:", appealData.incident_id);
+
+        // Audit log
+        await onLogAction(
+          "appeal_retract",
+          `Retracted incident appeal decision for incident #${appealData.incident_id}`,
+          "Appeal reopened - incident re-rejected",
+          appealData.user_id,
+          appealData.incident_id
+        );
       }
 
-      // Refresh the appeals list
       await fetchAppeals();
       setShowRetractModal(false);
       setSelectedAppeal(null);
@@ -178,15 +184,10 @@ function AppealsTab() {
   };
 
   const handleApproveAppeal = async (response) => {
-    try {
-      console.log(
-        "Approving appeal:",
-        selectedAppeal.id,
-        "Response:",
-        response
-      );
+    if (!selectedAppeal) return;
 
-      // Update appeal status in database
+    try {
+      // Update appeal status
       const { error: appealError } = await supabase
         .from("appeals")
         .update({
@@ -199,29 +200,31 @@ function AppealsTab() {
 
       if (appealError) throw appealError;
 
-      // Handle the actual action based on appeal type
       const appealData = selectedAppeal.appealData;
 
       if (appealData.appeal_type === "ban_appeal") {
-        // Unban the user - remove ban status
         const { error: userError } = await supabase
           .from("users")
           .update({
-            status: "active", // Remove ban status
-            ban_reason: null, // Clear ban reason
+            status: "active",
+            ban_reason: null,
           })
           .eq("userid", appealData.user_id);
 
         if (userError) throw userError;
-        console.log(
-          "User unbanned and status set to active:",
-          appealData.user_id
+
+        // Audit log
+        await onLogAction(
+          "appeal_approve",
+          `Approved ban appeal for user: ${selectedAppeal.from}`,
+          `Response: ${response} | User unbanned`,
+          appealData.user_id,
+          null
         );
       } else if (
         appealData.appeal_type === "incident_rejection_appeal" &&
         appealData.incident_id
       ) {
-        // Re-approve the incident
         const { error: incidentError } = await supabase
           .from("incident_report")
           .update({
@@ -231,10 +234,17 @@ function AppealsTab() {
           .eq("id", appealData.incident_id);
 
         if (incidentError) throw incidentError;
-        console.log("Incident re-approved:", appealData.incident_id);
+
+        // Audit log
+        await onLogAction(
+          "appeal_approve",
+          `Approved incident appeal #${appealData.incident_id} for user: ${selectedAppeal.from}`,
+          `Response: ${response} | Incident re-approved`,
+          appealData.user_id,
+          appealData.incident_id
+        );
       }
 
-      // Refresh the appeals list
       await fetchAppeals();
       setShowApproveModal(false);
       setSelectedAppeal(null);
@@ -245,10 +255,9 @@ function AppealsTab() {
   };
 
   const handleRejectAppeal = async (reason) => {
-    try {
-      console.log("Rejecting appeal:", selectedAppeal.id, "Reason:", reason);
+    if (!selectedAppeal) return;
 
-      // Update appeal status in database
+    try {
       const { error } = await supabase
         .from("appeals")
         .update({
@@ -261,11 +270,19 @@ function AppealsTab() {
 
       if (error) throw error;
 
-      // For ban appeals that are rejected: KEEP the user banned (no changes to user table)
-      // For incident appeals that are rejected: KEEP the incident rejected (no changes to incident table)
-      console.log("Appeal rejected. User/incident status remains unchanged.");
+      const appealData = selectedAppeal.appealData;
+      const appealType =
+        appealData.appeal_type === "ban_appeal" ? "ban" : "incident";
 
-      // Refresh the appeals list
+      // Audit log
+      await onLogAction(
+        "appeal_reject",
+        `Rejected ${appealType} appeal from: ${selectedAppeal.from}`,
+        `Reason: ${reason}`,
+        appealData.user_id,
+        appealData.incident_id || null
+      );
+
       await fetchAppeals();
       setShowRejectModal(false);
       setSelectedAppeal(null);
@@ -275,21 +292,20 @@ function AppealsTab() {
     }
   };
 
-  // Filter appeals based on selected filter
+  // Filter appeals
   const filteredAppeals = appeals.filter((appeal) => {
-    switch (filter) {
-      case "pending":
-        return appeal.status === "pending";
-      case "resolved":
-        return appeal.status === "approved" || appeal.status === "rejected";
-      case "all":
-        return true;
-      default:
-        return true;
-    }
+    const statusMatch =
+      filter === "all" ||
+      (filter === "pending" && appeal.status === "pending") ||
+      (filter === "resolved" &&
+        (appeal.status === "approved" || appeal.status === "rejected"));
+
+    const typeMatch =
+      typeFilter === "all" || appeal.appealType === `${typeFilter}_appeal`;
+
+    return statusMatch && typeMatch;
   });
 
-  // Counts for filter buttons
   const pendingCount = appeals.filter((a) => a.status === "pending").length;
   const resolvedCount = appeals.filter(
     (a) => a.status === "approved" || a.status === "rejected"
@@ -307,29 +323,47 @@ function AppealsTab() {
 
   return (
     <div className="appeals-tab">
-      {/* Filter Buttons */}
       <div className="appeals-filters">
-        <button
-          className={filter === "pending" ? "active" : ""}
-          onClick={() => setFilter("pending")}
-        >
-          Pending ({pendingCount})
-        </button>
-        <button
-          className={filter === "resolved" ? "active" : ""}
-          onClick={() => setFilter("resolved")}
-        >
-          Resolved ({resolvedCount})
-        </button>
-        <button
-          className={filter === "all" ? "active" : ""}
-          onClick={() => setFilter("all")}
-        >
-          All ({totalCount})
-        </button>
+        <div className="filter-group">
+          <h4>Status</h4>
+          <div className="filter-buttons">
+            <button
+              className={filter === "pending" ? "active" : ""}
+              onClick={() => setFilter("pending")}
+            >
+              Pending ({pendingCount})
+            </button>
+            <button
+              className={filter === "resolved" ? "active" : ""}
+              onClick={() => setFilter("resolved")}
+            >
+              Resolved ({resolvedCount})
+            </button>
+            <button
+              className={filter === "all" ? "active" : ""}
+              onClick={() => setFilter("all")}
+            >
+              All ({totalCount})
+            </button>
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <h4>Appeal Type</h4>
+          <div className="dropdown-filter">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="type-dropdown"
+            >
+              <option value="all">All Appeal Types</option>
+              <option value="ban">Ban Appeals</option>
+              <option value="incident">Incident Appeals</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      {/* Appeals List */}
       <div className="appeals-list">
         {filteredAppeals.length > 0 ? (
           filteredAppeals.map((appeal) => (
@@ -344,16 +378,11 @@ function AppealsTab() {
           ))
         ) : (
           <div className="no-data">
-            <p>
-              {filter === "pending" && "No pending appeals found."}
-              {filter === "resolved" && "No resolved appeals found."}
-              {filter === "all" && "No appeals found."}
-            </p>
+            <p>No appeals found matching the selected filters.</p>
           </div>
         )}
       </div>
 
-      {/* Modals */}
       {showApproveModal && (
         <ApproveAppealModal
           appeal={selectedAppeal}
@@ -381,7 +410,7 @@ function AppealsTab() {
   );
 }
 
-// Appeal Card Component
+// Appeal Card Component (unchanged)
 function AppealCard({ appeal, onApprove, onReject, onRetract, showActions }) {
   const isResolved =
     appeal.status === "approved" || appeal.status === "rejected";
@@ -411,7 +440,7 @@ function AppealCard({ appeal, onApprove, onReject, onRetract, showActions }) {
           <div className="incident-context">
             <small>
               <strong>Incident #{appeal.incidentContext.id}:</strong>{" "}
-              {appeal.incidentContext.type} at {appeal.incidentContext.location}
+              {appeal.incidentContext.type} at {appeal.incidentContext.location}{" "}
               ({appeal.incidentContext.severity}) - Status:{" "}
               {appeal.incidentContext.status}
             </small>
@@ -449,7 +478,6 @@ function AppealCard({ appeal, onApprove, onReject, onRetract, showActions }) {
             </button>
           </>
         )}
-
         {isResolved && (
           <button onClick={() => onRetract(appeal)} className="btn-warning">
             Retract Decision
